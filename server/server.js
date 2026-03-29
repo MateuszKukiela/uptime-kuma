@@ -1931,6 +1931,46 @@ async function startMonitors() {
         server.monitorList[monitor.id] = monitor;
     }
 
+    // Backfill downtime for the period Kuma was offline.
+    // For each monitor, if the last heartbeat is older than one interval, insert a DOWN heartbeat
+    // so the offline gap is counted as downtime rather than silently skipped.
+    const now = dayjs.utc();
+    for (let monitor of list) {
+        try {
+            const lastBeat = await R.findOne("heartbeat", " monitor_id = ? ORDER BY time DESC", [ monitor.id ]);
+            if (lastBeat) {
+                const lastTime = dayjs.utc(lastBeat.time);
+                const gapSeconds = now.diff(lastTime, "second");
+                const intervalSeconds = (monitor.interval || 60);
+
+                if (gapSeconds > intervalSeconds * 2) {
+                    // Insert DOWN heartbeats at each interval step across the entire offline gap
+                    // so the ping chart renders the full period as red, not just a single blip.
+                    let uptimeCalculator = await UptimeCalculator.getUptimeCalculator(monitor.id);
+                    let cursor = lastTime.add(intervalSeconds, "second");
+                    let count = 0;
+                    while (cursor.isBefore(now) || cursor.isSame(now)) {
+                        let bean = R.dispense("heartbeat");
+                        bean.monitor_id = monitor.id;
+                        bean.time = R.isoDateTimeMillis(cursor);
+                        bean.status = 0; // DOWN
+                        bean.msg = "Uptime Kuma was offline";
+                        bean.important = count === 0 ? 1 : 0; // only first one triggers alert
+                        bean.duration = intervalSeconds;
+                        bean.ping = 0;
+                        await R.store(bean);
+                        await uptimeCalculator.update(0, 0, cursor);
+                        cursor = cursor.add(intervalSeconds, "second");
+                        count++;
+                    }
+                    log.info("monitor", `Monitor #${monitor.id}: inserted ${count} offline gap heartbeats (${gapSeconds}s total)`);
+                }
+            }
+        } catch (e) {
+            log.error("monitor", `Failed to backfill offline gap for monitor #${monitor.id}: ${e.message}`);
+        }
+    }
+
     for (let monitor of list) {
         try {
             await monitor.start(io);

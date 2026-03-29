@@ -2,6 +2,22 @@
     <img src="./public/icon.svg" width="128" alt="Uptime Kuma Logo" />
 </div>
 
+# Uptime Kuma (fork by MateuszKukiela)
+
+> **This is a fork made out of pure spite.**
+>
+> The upstream maintainer decided that when Uptime Kuma's server goes offline, the downtime during that period simply doesn't exist. His response to years of bug reports was: *"it is normal by current design."* This fork fixes that.
+
+## What's different from upstream
+
+### Offline gap backfill
+
+When Kuma restarts after being offline, it now inserts a `DOWN` heartbeat covering the entire period it was unreachable. The logic is embarrassingly simple: we know the timestamp of the last heartbeat before the outage, we know the current time when Kuma comes back up, so everything in between is counted as downtime.
+
+**Changed file:** `server/server.js` — `startMonitors()` function.
+
+---
+
 # Uptime Kuma
 
 Uptime Kuma is an easy-to-use self-hosted monitoring tool.
